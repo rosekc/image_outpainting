@@ -1,5 +1,6 @@
 import imghdr
 import itertools
+import math
 import os
 
 import keras
@@ -14,15 +15,25 @@ from model import (build_discriminator_proxy, build_global_discriminator,
 
 
 class DataGenerator(object):
-    def __init__(self, root_dir):
+    def __init__(self, root_dir, batch_size=10, validation_rate=0.1):
+        if not isinstance(validation_rate, float) and not 0 <= validation_rate <= 1:
+            raise ValueError()
+
+        self.batch_size = batch_size
+
         self.reset()
         self.img_file_list = []
+
         for root, dirs, files in os.walk(root_dir):
             for f in files:
                 full_path = os.path.join(root, f)
                 if imghdr.what(full_path) is None:
                     continue
                 self.img_file_list.append(full_path)
+
+        validation_size = math.floor(validation_rate * len(self.img_file_list))
+        self.validation_file_list = self.img_file_list[:validation_size]
+        self.img_file_list = self.img_file_list[validation_size:]
 
     def __len__(self):
         return len(self.img_file_list)
@@ -39,25 +50,37 @@ class DataGenerator(object):
                                                                :, -padding_width:, :] = pix_avg.reshape(-1, 1, 1, 1)
         return padded_inputs, inputs
 
-    def flow(self, batch_size):
-        np.random.shuffle(self.img_file_list)
-        for f in self.img_file_list:
+    def get_file_generator(self, file_list, shuffle=True):
+        np.random.shuffle(file_list)
+        for f in file_list:
             img = load_img(f)
             self.images.append(img_to_array(img))
 
-            if len(self.images) == batch_size:
+            if len(self.images) == self.batch_size:
                 inputs = np.asarray(self.images, dtype=np.float32) / 255
                 self.reset()
                 yield self.preprocessing_images(inputs, 64)
+
+    def flow(self):
+        return self.get_file_generator(self.img_file_list)
+
+    def validation_data(self, validation_steps=1):
+        # def reshape_list(x, y):
+        #     x[0].append(y[0])
+        #     x[1].append(y[1])
+        #     return x
+        # data = functools.reduce(reshape_list, validation_generator, ([], []))
+        # data = np.concatenate(data[0]), np.concatenate(data[1])
+        return itertools.islice(self.get_file_generator(self.validation_file_list, False), 0, validation_steps)
 
 
 path = 'place365'
 
 
 def train(path, batch_size=10, epochs=50, steps_per_epoch=30):
-    data_generator = DataGenerator(path)
+    data_generator = DataGenerator(path, batch_size)
     data_size = len(data_generator)
-    data = data_generator.flow(batch_size)
+    data = data_generator.flow()
 
     G, D, C = build_model()
 
