@@ -88,7 +88,7 @@ def build_model(input_shape=(256, 256, 3), alpha=0.004, eps=1e-9):
     # global discriminator
     DG = build_global_discriminator()(discriminator_inputs)
     x = keras.layers.Concatenate()([DLL, DLR, DG])
-    x = keras.layers.Dense(1)(x)
+    x = keras.layers.Dense(1, activation='sigmoid')(x)
     D = keras.Model(discriminator_inputs, x)
     D.compile(loss='binary_crossentropy', optimizer=keras.optimizers.Adam())
 
