@@ -14,12 +14,33 @@ from model import (build_discriminator_proxy, build_global_discriminator,
                    build_local_discriminator, build_model, bulid_generator)
 
 
+def generate_padded_images(imgs, padding_width):
+    padded_imgs = np.copy(imgs)
+    pix_avg = np.mean(imgs, axis=(1, 2, 3))
+    padded_imgs[:, :, :padding_width, :] = padded_imgs[:,
+                                                       :, -padding_width:, :] = pix_avg.reshape(-1, 1, 1, 1)
+    return padded_imgs
+
+
+def crop_and_resize_image(img, img_size):
+    source_size = img.size
+    if source_size == img_size:
+        return img
+    max_size = min(source_size)
+    img = img.crop([(img.width - max_size) // 2, (img.height - max_size) // 2,
+                    (img.width - max_size) // 2 + max_size, (img.height - max_size) // 2 + max_size])
+    img = img.resize(img_size)
+    return img
+
+
 class DataGenerator(object):
-    def __init__(self, root_dir, batch_size=10, validation_rate=0.1):
+    def __init__(self, root_dir, img_size=(256, 256), batch_size=10, padding_width=64, validation_rate=0.1):
         if not isinstance(validation_rate, float) and not 0 <= validation_rate <= 1:
             raise ValueError()
 
         self.batch_size = batch_size
+        self.img_size = img_size
+        self.padding_width = padding_width
 
         self.reset()
         self.img_file_list = []
@@ -43,35 +64,31 @@ class DataGenerator(object):
         self.points = []
         self.masks = []
 
-    def preprocessing_images(self, inputs, padding_width):
-        padded_inputs = np.copy(inputs)
-        pix_avg = np.mean(inputs, axis=(1, 2, 3))
-        padded_inputs[:, :, :padding_width, :] = padded_inputs[:,
-                                                               :, -padding_width:, :] = pix_avg.reshape(-1, 1, 1, 1)
-        return padded_inputs, inputs
-
     def get_file_generator(self, file_list, shuffle=True):
-        np.random.shuffle(file_list)
-        for f in file_list:
-            img = load_img(f)
-            self.images.append(img_to_array(img))
+        while True:
+            if shuffle:
+                 np.random.shuffle(file_list)
+            for f in file_list:
+                img = crop_and_resize_image(load_img(f), self.img_size)
+                self.images.append(img_to_array(img))
 
-            if len(self.images) == self.batch_size:
-                inputs = np.asarray(self.images, dtype=np.float32) / 255
-                self.reset()
-                yield self.preprocessing_images(inputs, 64)
+                if len(self.images) == self.batch_size:
+                    imgs = (np.asarray(self.images,
+                                       dtype=np.float32) / 255) * 2 - 1
+                    self.reset()
+                    yield generate_padded_images(imgs, self.padding_width), imgs
 
     def flow(self):
         return self.get_file_generator(self.img_file_list)
 
-    def validation_data(self, validation_steps=1):
+    def validation_flow(self, validation_steps=1):
         # def reshape_list(x, y):
         #     x[0].append(y[0])
         #     x[1].append(y[1])
         #     return x
         # data = functools.reduce(reshape_list, validation_generator, ([], []))
         # data = np.concatenate(data[0]), np.concatenate(data[1])
-        return itertools.islice(self.get_file_generator(self.validation_file_list, False), 0, validation_steps)
+        return self.get_file_generator(self.validation_file_list, shuffle=False)
 
 
 path = 'place365'
